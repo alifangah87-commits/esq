@@ -1,4 +1,36 @@
 
+name: Build ESQ Scanner APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.5"
+          channel: stable
+          cache: true
+
+      - name: Generate Android project files
+        run: flutter create --platforms=android --org com.example .
+
       - name: Update Kotlin Gradle plugin
         run: |
           python3 - <<'PY'
@@ -15,8 +47,24 @@
 
           if count == 0:
               print(s)
-              raise SystemExit("ERROR: Versi Kotlin tidak dapat dikenal pasti. Semak kandungan settings.gradle.")
+              raise SystemExit("ERROR: Versi Kotlin tidak dapat dikenal pasti.")
 
           p.write_text(updated)
           print(p.read_text())
           PY
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build APK (Release)
+        run: >
+          flutter build apk --release
+          --dart-define=ATTENDANCE_API_URL=https://corporate.esqmalaysia.com/scannerQR
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esq-scanner-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
