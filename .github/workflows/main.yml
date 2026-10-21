@@ -31,7 +31,30 @@ jobs:
       - name: Generate Android project files
         run: flutter create --platforms=android --org com.example .
 
-      - name: Align Android build tool versions
+      - name: Install Android SDK 35
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            echo "ERROR: Android SDK directory not found"
+            exit 1
+          fi
+
+          if command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Align Android build versions
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -40,50 +63,87 @@ jobs:
           settings = Path("android/settings.gradle")
           wrapper = Path("android/gradle/wrapper/gradle-wrapper.properties")
 
+          app_candidates = [
+              Path("android/app/build.gradle"),
+              Path("android/app/build.gradle.kts"),
+          ]
+          app = next((p for p in app_candidates if p.exists()), None)
+
           if not settings.exists():
               raise SystemExit("ERROR: android/settings.gradle not found")
-
           if not wrapper.exists():
               raise SystemExit("ERROR: Gradle wrapper properties not found")
+          if app is None:
+              raise SystemExit("ERROR: Android app Gradle file not found")
 
-          content = settings.read_text()
+          # Align Android Gradle Plugin and Kotlin plugin.
+          s = settings.read_text()
 
-          agp_pattern = r'(?m)^(\s*id\s*\(?\s*["\']com\.android\.application["\']\s*\)?\s*version\s*["\'])[^"\']+(["\'])'
-          kotlin_pattern = r'(?m)^(\s*id\s*\(?\s*["\']org\.jetbrains\.kotlin\.android["\']\s*\)?\s*version\s*["\'])[^"\']+(["\'])'
-
-          content, agp_count = re.subn(
-              agp_pattern, r'\g<1>8.6.1\2', content
+          agp_pattern = (
+              r'(?m)^([ \t]*id[ \t]*\(?[ \t]*'
+              r'["\']com\.android\.application["\'][ \t]*\)?'
+              r'[ \t]*version[ \t]*["\'])[^"\']+(["\'])'
           )
-          content, kotlin_count = re.subn(
-              kotlin_pattern, r'\g<1>2.0.21\2', content
+          kotlin_pattern = (
+              r'(?m)^([ \t]*id[ \t]*\(?[ \t]*'
+              r'["\']org\.jetbrains\.kotlin\.android["\'][ \t]*\)?'
+              r'[ \t]*version[ \t]*["\'])[^"\']+(["\'])'
           )
 
-          if agp_count == 0:
-              raise SystemExit("ERROR: Could not update AGP version")
-          if kotlin_count == 0:
-              raise SystemExit("ERROR: Could not update Kotlin version")
+          s, agp_count = re.subn(agp_pattern, r'\g<1>8.6.1\2', s)
+          s, kotlin_count = re.subn(kotlin_pattern, r'\g<1>2.0.21\2', s)
 
-          settings.write_text(content)
+          if agp_count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected 1 AGP version entry, found {agp_count}"
+              )
+          if kotlin_count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected 1 Kotlin version entry, found {kotlin_count}"
+              )
 
-          wrapper_content = wrapper.read_text()
-          wrapper_content, wrapper_count = re.subn(
-              r'gradle-[0-9][0-9.]*-(?:all|bin)\.zip',
+          settings.write_text(s)
+
+          # AGP 8.6 requires Gradle 8.7.
+          w = wrapper.read_text()
+          w, wrapper_count = re.subn(
+              r'gradle-[0-9]+(?:\.[0-9]+)*-(?:all|bin)\.zip',
               'gradle-8.7-all.zip',
-              wrapper_content
+              w,
           )
 
-          if wrapper_count == 0:
-              raise SystemExit("ERROR: Could not update Gradle wrapper URL")
+          if wrapper_count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected 1 Gradle distribution URL, found {wrapper_count}"
+              )
 
-          wrapper.write_text(wrapper_content)
+          wrapper.write_text(w)
 
-          print("=== Verified Android settings ===")
+          # CameraX 1.5.0 requires compileSdk 35 or higher.
+          a = app.read_text()
+          compile_pattern = (
+              r'(?m)^([ \t]*compileSdk(?:Version)?'
+              r'[ \t]*(?:=[ \t]*)?).+$'
+          )
+          a, compile_count = re.subn(compile_pattern, r'\g<1>35', a)
+
+          if compile_count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected 1 compileSdk entry in {app}, "
+                  f"found {compile_count}"
+              )
+
+          app.write_text(a)
+
+          print("=== Android build configuration ===")
           print(settings.read_text())
-          print("=== Verified Gradle wrapper ===")
+          print("=== Gradle wrapper ===")
           print(wrapper.read_text())
-          print("AGP updated:", agp_count)
-          print("Kotlin updated:", kotlin_count)
-          print("Gradle wrapper updated:", wrapper_count)
+          print("=== App compileSdk ===")
+          for line in app.read_text().splitlines():
+              if re.match(r'^[ \t]*compileSdk(?:Version)?\b', line):
+                  print(line)
+          print("Android build configuration updated successfully.")
           PY
 
       - name: Check Flutter
