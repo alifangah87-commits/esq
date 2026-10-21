@@ -1,9 +1,11 @@
+
 name: Build ESQ Scanner APK
 
 on:
-  workflow_dispatch:          # Boleh tekan button "Run workflow" manual
+  workflow_dispatch:
   push:
-    branches: [ main ]        # Auto build setiap kali push ke main
+    branches:
+      - main
 
 jobs:
   build:
@@ -16,26 +18,31 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: "17"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
-          channel: 'stable'
+          flutter-version: "3.24.5"
+          channel: stable
           cache: true
+
+      - name: Check Flutter
+        run: flutter doctor -v
 
       - name: Get dependencies
         run: flutter pub get
 
       - name: Build APK (Release)
-        run: |
-          flutter build apk --release \
-            --dart-define=ATTENDANCE_API_BASE=https://corporate.esqmalaysia.com/scannerQR
+        run: >
+          flutter build apk --release
+          --dart-define=ATTENDANCE_API_URL=https://corporate.esqmalaysia.com/scannerQR
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: esq-scanner-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
