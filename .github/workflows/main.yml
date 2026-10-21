@@ -1,59 +1,22 @@
 
-name: Build ESQ Scanner APK
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.24.5"
-          channel: stable
-          cache: true
-
-      - name: Generate Android project files
-        run: flutter create --platforms=android --org com.example .
-
       - name: Update Kotlin Gradle plugin
         run: |
-          echo "Current Android settings:"
-          cat android/settings.gradle
-          sed -i 's/org.jetbrains.kotlin.android" version "[^"]*"/org.jetbrains.kotlin.android" version "1.9.24"/' android/settings.gradle
-          echo "Updated Android settings:"
-          cat android/settings.gradle
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
 
-      - name: Check Flutter
-        run: flutter doctor -v
+          p = Path("android/settings.gradle")
+          if not p.exists():
+              raise SystemExit("ERROR: android/settings.gradle tidak dijumpai")
 
-      - name: Get dependencies
-        run: flutter pub get
+          s = p.read_text()
+          pattern = r'((?:id|kotlin)\s*\(?\s*["\']org\.jetbrains\.kotlin\.android["\']\s*\)?\s*version\s*["\'])[^"\']+(["\'])'
+          updated, count = re.subn(pattern, r'\g<1>2.0.21\2', s)
 
-      - name: Build APK (Release)
-        run: >
-          flutter build apk --release
-          --dart-define=ATTENDANCE_API_URL=https://corporate.esqmalaysia.com/scannerQR
+          if count == 0:
+              print(s)
+              raise SystemExit("ERROR: Versi Kotlin tidak dapat dikenal pasti. Semak kandungan settings.gradle.")
 
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: esq-scanner-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
+          p.write_text(updated)
+          print(p.read_text())
+          PY
