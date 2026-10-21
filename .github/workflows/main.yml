@@ -31,42 +31,63 @@ jobs:
       - name: Generate Android project files
         run: flutter create --platforms=android --org com.example .
 
-      - name: Update Android Gradle Plugin and Kotlin
+      - name: Align Android build tool versions
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
 
-          p = Path("android/settings.gradle")
-          if not p.exists():
-              raise SystemExit("ERROR: android/settings.gradle tidak dijumpai")
+          settings = Path("android/settings.gradle")
+          wrapper = Path("android/gradle/wrapper/gradle-wrapper.properties")
 
-          s = p.read_text()
+          if not settings.exists():
+              raise SystemExit("ERROR: android/settings.gradle not found")
 
-          s, agp_count = re.subn(
-              r'(?m)(id\s*\(?\s*["\']com\.android\.application["\']\s*version\s*["\'])[^"\']+(["\'])',
-              r'\g<1>8.6.1\2',
-              s
+          if not wrapper.exists():
+              raise SystemExit("ERROR: Gradle wrapper properties not found")
+
+          content = settings.read_text()
+
+          agp_pattern = r'(?m)^(\s*id\s*\(?\s*["\']com\.android\.application["\']\s*\)?\s*version\s*["\'])[^"\']+(["\'])'
+          kotlin_pattern = r'(?m)^(\s*id\s*\(?\s*["\']org\.jetbrains\.kotlin\.android["\']\s*\)?\s*version\s*["\'])[^"\']+(["\'])'
+
+          content, agp_count = re.subn(
+              agp_pattern, r'\g<1>8.6.1\2', content
           )
-
-          s, kotlin_count = re.subn(
-              r'(?m)(id\s*\(?\s*["\']org\.jetbrains\.kotlin\.android["\']\s*version\s*["\'])[^"\']+(["\'])',
-              r'\g<1>2.0.21\2',
-              s
+          content, kotlin_count = re.subn(
+              kotlin_pattern, r'\g<1>2.0.21\2', content
           )
-
-          print(s)
-          print(f"AGP entries updated: {agp_count}")
-          print(f"Kotlin entries updated: {kotlin_count}")
 
           if agp_count == 0:
-              raise SystemExit("ERROR: Versi AGP tidak dijumpai dalam settings.gradle")
-
+              raise SystemExit("ERROR: Could not update AGP version")
           if kotlin_count == 0:
-              raise SystemExit("ERROR: Versi Kotlin tidak dijumpai dalam settings.gradle")
+              raise SystemExit("ERROR: Could not update Kotlin version")
 
-          p.write_text(s)
+          settings.write_text(content)
+
+          wrapper_content = wrapper.read_text()
+          wrapper_content, wrapper_count = re.subn(
+              r'gradle-[0-9][0-9.]*-(?:all|bin)\.zip',
+              'gradle-8.7-all.zip',
+              wrapper_content
+          )
+
+          if wrapper_count == 0:
+              raise SystemExit("ERROR: Could not update Gradle wrapper URL")
+
+          wrapper.write_text(wrapper_content)
+
+          print("=== Verified Android settings ===")
+          print(settings.read_text())
+          print("=== Verified Gradle wrapper ===")
+          print(wrapper.read_text())
+          print("AGP updated:", agp_count)
+          print("Kotlin updated:", kotlin_count)
+          print("Gradle wrapper updated:", wrapper_count)
           PY
+
+      - name: Check Flutter
+        run: flutter doctor -v
 
       - name: Get dependencies
         run: flutter pub get
