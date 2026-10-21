@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -31,10 +32,12 @@ class EsqScannerApp extends StatelessWidget {
           elevation: 0,
           centerTitle: false,
         ),
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           color: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
         ),
       ),
       home: const ScannerHome(),
@@ -74,39 +77,63 @@ class AttendanceService {
         participantId: qrValue,
       );
     }
+
     try {
       final response = await http
           .post(
             Uri.parse(apiBaseUrl),
-            headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
-            body: jsonEncode({'qr': qrValue, 'action': 'check_in'}),
+            headers: const {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({
+              'qr': qrValue,
+              'action': 'check_in',
+            }),
           )
           .timeout(const Duration(seconds: 12));
+
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return CheckInResult(
           status: CheckInStatus.error,
           message: 'Ralat pelayan (${response.statusCode}). Cuba sekali lagi.',
         );
       }
+
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final ok = data['success'] == true || data['status'] == 'success';
-      final already = data['already_checked_in'] == true || data['status'] == 'already_checked_in';
+      final already = data['already_checked_in'] == true ||
+          data['status'] == 'already_checked_in';
+
       return CheckInResult(
-        status: already ? CheckInStatus.alreadyCheckedIn : ok ? CheckInStatus.success : CheckInStatus.invalid,
-        message: (data['message'] ?? (already
-                ? 'Peserta sudah direkodkan hadir.'
-                : ok
-                    ? 'Kehadiran berjaya disahkan.'
-                    : 'QR tidak sah atau peserta tidak ditemui.'))
+        status: already
+            ? CheckInStatus.alreadyCheckedIn
+            : ok
+                ? CheckInStatus.success
+                : CheckInStatus.invalid,
+        message: (data['message'] ??
+                (already
+                    ? 'Peserta sudah direkodkan hadir.'
+                    : ok
+                        ? 'Kehadiran berjaya disahkan.'
+                        : 'QR tidak sah atau peserta tidak ditemui.'))
             .toString(),
-        participantName: (data['participant_name'] ?? data['name'])?.toString(),
+        participantName:
+            (data['participant_name'] ?? data['name'])?.toString(),
         participantId: (data['participant_id'] ?? data['id'])?.toString(),
-        checkedInAt: DateTime.tryParse((data['checked_in_at'] ?? '').toString()),
+        checkedInAt:
+            DateTime.tryParse((data['checked_in_at'] ?? '').toString()),
       );
     } on TimeoutException {
-      return const CheckInResult(status: CheckInStatus.error, message: 'Sambungan perlahan. Sila cuba lagi.');
+      return const CheckInResult(
+        status: CheckInStatus.error,
+        message: 'Sambungan perlahan. Sila cuba lagi.',
+      );
     } catch (_) {
-      return const CheckInResult(status: CheckInStatus.error, message: 'Tidak dapat menghubungi sistem. Semak internet/API.');
+      return const CheckInResult(
+        status: CheckInStatus.error,
+        message: 'Tidak dapat menghubungi sistem. Semak internet/API.',
+      );
     }
   }
 }
@@ -118,12 +145,14 @@ class ScannerHome extends StatefulWidget {
   State<ScannerHome> createState() => _ScannerHomeState();
 }
 
-class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
+class _ScannerHomeState extends State<ScannerHome>
+    with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
     detectionSpeed: DetectionSpeed.noDuplicates,
     facing: CameraFacing.back,
     formats: const [BarcodeFormat.qrCode],
   );
+
   final AttendanceService _service = AttendanceService();
 
   bool _processing = false;
@@ -146,6 +175,7 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
   Future<void> _loadCounters() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
+
     setState(() {
       _successCount = prefs.getInt('successCount') ?? 0;
       _alreadyCount = prefs.getInt('alreadyCount') ?? 0;
@@ -162,7 +192,8 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
       _controller.stop();
     } else if (state == AppLifecycleState.resumed && !_paused && mounted) {
       _controller.start();
@@ -171,23 +202,33 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
 
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_processing || _paused) return;
+
     final raw = capture.barcodes
         .map((b) => b.rawValue)
         .whereType<String>()
         .firstWhere((v) => v.trim().isNotEmpty, orElse: () => '');
+
     if (raw.isEmpty) return;
+
     final now = DateTime.now();
-    if (_lastRawValue == raw && _lastScanAt != null && now.difference(_lastScanAt!) < const Duration(seconds: 3)) return;
+    if (_lastRawValue == raw &&
+        _lastScanAt != null &&
+        now.difference(_lastScanAt!) < const Duration(seconds: 3)) {
+      return;
+    }
 
     _processing = true;
     _lastRawValue = raw;
     _lastScanAt = now;
+
     await _controller.stop();
 
     final result = await _service.checkIn(raw);
     if (!mounted) return;
+
     setState(() {
       _lastResult = result;
+
       switch (result.status) {
         case CheckInStatus.success:
           _successCount++;
@@ -201,9 +242,12 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
           break;
       }
     });
+
     await _saveCounters();
     await Future<void>.delayed(const Duration(milliseconds: 1250));
+
     if (!mounted || _paused) return;
+
     setState(() => _lastResult = null);
     _processing = false;
     await _controller.start();
@@ -216,6 +260,7 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
 
   Future<void> _togglePause() async {
     setState(() => _paused = !_paused);
+
     if (_paused) {
       await _controller.stop();
     } else {
@@ -251,28 +296,72 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
             Container(
               height: 44,
               width: 44,
-              decoration: BoxDecoration(color: esqRed, borderRadius: BorderRadius.circular(14)),
-              child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white, size: 27),
+              decoration: BoxDecoration(
+                color: esqRed,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.qr_code_scanner_rounded,
+                color: Colors.white,
+                size: 27,
+              ),
             ),
             const SizedBox(width: 12),
             const Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('ESQ SCANNER', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17, letterSpacing: .3)),
+                  Text(
+                    'ESQ SCANNER',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 17,
+                      letterSpacing: .3,
+                    ),
+                  ),
                   SizedBox(height: 2),
-                  Text('Pengesahan kehadiran', style: TextStyle(color: muted, fontSize: 12, fontWeight: FontWeight.w500)),
+                  Text(
+                    'Pengesahan kehadiran',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(30)),
-              child: Row(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 7,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDCFCE7),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: const Row(
                 children: [
-                  Container(width: 7, height: 7, decoration: const BoxDecoration(color: Color(0xFF16A34A), shape: BoxShape.circle)),
-                  const SizedBox(width: 6),
-                  const Text('CREW', style: TextStyle(color: Color(0xFF166534), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: .8)),
+                  SizedBox(
+                    width: 7,
+                    height: 7,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Color(0xFF16A34A),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    'CREW',
+                    style: TextStyle(
+                      color: Color(0xFF166534),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: .8,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -286,11 +375,26 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
               child: Row(
                 children: [
-                  _statCard('BERJAYA', _successCount, const Color(0xFF15803D), Icons.check_circle_rounded),
+                  _statCard(
+                    'BERJAYA',
+                    _successCount,
+                    const Color(0xFF15803D),
+                    Icons.check_circle_rounded,
+                  ),
                   const SizedBox(width: 8),
-                  _statCard('SUDAH HADIR', _alreadyCount, const Color(0xFFB45309), Icons.history_rounded),
+                  _statCard(
+                    'SUDAH HADIR',
+                    _alreadyCount,
+                    const Color(0xFFB45309),
+                    Icons.history_rounded,
+                  ),
                   const SizedBox(width: 8),
-                  _statCard('RALAT', _errorCount, const Color(0xFFB91C1C), Icons.error_outline_rounded),
+                  _statCard(
+                    'RALAT',
+                    _errorCount,
+                    const Color(0xFFB91C1C),
+                    Icons.error_outline_rounded,
+                  ),
                 ],
               ),
             ),
@@ -302,7 +406,10 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      MobileScanner(controller: _controller, onDetect: _onDetect),
+                      MobileScanner(
+                        controller: _controller,
+                        onDetect: _onDetect,
+                      ),
                       IgnorePointer(
                         child: Center(
                           child: SizedBox(
@@ -312,12 +419,18 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                               children: [
                                 Container(
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.white.withValues(alpha: .88), width: 2),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(.88),
+                                      width: 2,
+                                    ),
                                     borderRadius: BorderRadius.circular(24),
                                   ),
                                 ),
                                 for (final alignment in const [
-                                  Alignment.topLeft, Alignment.topRight, Alignment.bottomLeft, Alignment.bottomRight
+                                  Alignment.topLeft,
+                                  Alignment.topRight,
+                                  Alignment.bottomLeft,
+                                  Alignment.bottomRight,
                                 ])
                                   Align(
                                     alignment: alignment,
@@ -326,10 +439,30 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                                       height: 34,
                                       decoration: BoxDecoration(
                                         border: Border(
-                                          top: alignment.y < 0 ? const BorderSide(color: Colors.white, width: 5) : BorderSide.none,
-                                          bottom: alignment.y > 0 ? const BorderSide(color: Colors.white, width: 5) : BorderSide.none,
-                                          left: alignment.x < 0 ? const BorderSide(color: Colors.white, width: 5) : BorderSide.none,
-                                          right: alignment.x > 0 ? const BorderSide(color: Colors.white, width: 5) : BorderSide.none,
+                                          top: alignment.y < 0
+                                              ? const BorderSide(
+                                                  color: Colors.white,
+                                                  width: 5,
+                                                )
+                                              : BorderSide.none,
+                                          bottom: alignment.y > 0
+                                              ? const BorderSide(
+                                                  color: Colors.white,
+                                                  width: 5,
+                                                )
+                                              : BorderSide.none,
+                                          left: alignment.x < 0
+                                              ? const BorderSide(
+                                                  color: Colors.white,
+                                                  width: 5,
+                                                )
+                                              : BorderSide.none,
+                                          right: alignment.x > 0
+                                              ? const BorderSide(
+                                                  color: Colors.white,
+                                                  width: 5,
+                                                )
+                                              : BorderSide.none,
                                         ),
                                       ),
                                     ),
@@ -343,37 +476,76 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                         top: 14,
                         left: 14,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-                          decoration: BoxDecoration(color: Colors.black.withValues(alpha: .52), borderRadius: BorderRadius.circular(30)),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 11,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(.52),
+                            borderRadius: BorderRadius.circular(30),
+                          ),
                           child: Row(
                             children: [
-                              Container(width: 7, height: 7, decoration: const BoxDecoration(color: Color(0xFF4ADE80), shape: BoxShape.circle)),
+                              const SizedBox(
+                                width: 7,
+                                height: 7,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Color(0xFF4ADE80),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
                               const SizedBox(width: 7),
-                              Text(_paused ? 'DIJEDA' : 'KAMERA AKTIF',
-                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: .7)),
+                              Text(
+                                _paused ? 'DIJEDA' : 'KAMERA AKTIF',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: .7,
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       ),
                       if (_paused)
                         Container(
-                          color: Colors.black.withValues(alpha: .78),
+                          color: Colors.black.withOpacity(.78),
                           child: const Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.pause_circle_filled_rounded, color: Colors.white, size: 64),
+                                Icon(
+                                  Icons.pause_circle_filled_rounded,
+                                  color: Colors.white,
+                                  size: 64,
+                                ),
                                 SizedBox(height: 10),
-                                Text('IMBASAN DIJEDA', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+                                Text(
+                                  'IMBASAN DIJEDA',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
                                 SizedBox(height: 5),
-                                Text('Tekan butang sambung di bawah', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                Text(
+                                  'Tekan butang sambung di bawah',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                         ),
                       if (result != null)
                         Container(
-                          color: resultColor.withValues(alpha: .96),
+                          color: resultColor.withOpacity(.96),
                           padding: const EdgeInsets.all(24),
                           child: Center(
                             child: Column(
@@ -382,11 +554,15 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                                 Container(
                                   width: 86,
                                   height: 86,
-                                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: .17), shape: BoxShape.circle),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(.17),
+                                    shape: BoxShape.circle,
+                                  ),
                                   child: Icon(
                                     result.status == CheckInStatus.success
                                         ? Icons.check_rounded
-                                        : result.status == CheckInStatus.alreadyCheckedIn
+                                        : result.status ==
+                                                CheckInStatus.alreadyCheckedIn
                                             ? Icons.history_rounded
                                             : Icons.priority_high_rounded,
                                     color: Colors.white,
@@ -397,30 +573,64 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                                 Text(
                                   result.status == CheckInStatus.success
                                       ? 'KEHADIRAN DISAHKAN'
-                                      : result.status == CheckInStatus.alreadyCheckedIn
+                                      : result.status ==
+                                              CheckInStatus.alreadyCheckedIn
                                           ? 'PESERTA SUDAH HADIR'
-                                          : result.status == CheckInStatus.invalid
+                                          : result.status ==
+                                                  CheckInStatus.invalid
                                               ? 'QR TIDAK SAH'
                                               : 'SEMAK SAMBUNGAN',
                                   textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.white, fontSize: 21, height: 1.15, fontWeight: FontWeight.w900),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 21,
+                                    height: 1.15,
+                                    fontWeight: FontWeight.w900,
+                                  ),
                                 ),
                                 if (result.participantName != null) ...[
                                   const SizedBox(height: 12),
-                                  Text(result.participantName!, textAlign: TextAlign.center,
-                                      style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w700)),
+                                  Text(
+                                    result.participantName!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ],
                                 const SizedBox(height: 9),
-                                Text(result.message, textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
+                                Text(
+                                  result.message,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    height: 1.4,
+                                  ),
+                                ),
                                 const SizedBox(height: 18),
                                 const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                                    SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                     SizedBox(width: 9),
-                                    Text('Sedia untuk peserta seterusnya…',
-                                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                    Text(
+                                      'Sedia untuk peserta seterusnya…',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -439,27 +649,51 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(15),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
                     child: Row(
                       children: [
                         Container(
                           width: 44,
                           height: 44,
-                          decoration: BoxDecoration(color: const Color(0xFFFEE2E2), borderRadius: BorderRadius.circular(14)),
-                          child: const Icon(Icons.center_focus_strong_rounded, color: esqRed, size: 24),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEE2E2),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(
+                            Icons.center_focus_strong_rounded,
+                            color: esqRed,
+                            size: 24,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Sedia untuk scan', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: ink)),
+                              Text(
+                                'Sedia untuk scan',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                  color: ink,
+                                ),
+                              ),
                               SizedBox(height: 3),
-                              Text('Halakan kamera ke QR pada tiket peserta.', style: TextStyle(fontSize: 11, color: muted)),
+                              Text(
+                                'Halakan kamera ke QR pada tiket peserta.',
+                                style: TextStyle(fontSize: 11, color: muted),
+                              ),
                             ],
                           ),
                         ),
-                        Icon(Icons.bolt_rounded, color: Colors.amber.shade700, size: 24),
+                        Icon(
+                          Icons.bolt_rounded,
+                          color: Colors.amber.shade700,
+                          size: 24,
+                        ),
                       ],
                     ),
                   ),
@@ -471,13 +705,24 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                           height: 52,
                           child: FilledButton.icon(
                             onPressed: _togglePause,
-                            icon: Icon(_paused ? Icons.play_arrow_rounded : Icons.pause_rounded),
-                            label: Text(_paused ? 'SAMBUNG SCAN' : 'JEDA SCAN'),
+                            icon: Icon(
+                              _paused
+                                  ? Icons.play_arrow_rounded
+                                  : Icons.pause_rounded,
+                            ),
+                            label: Text(
+                              _paused ? 'SAMBUNG SCAN' : 'JEDA SCAN',
+                            ),
                             style: FilledButton.styleFrom(
                               backgroundColor: ink,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              textStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              textStyle: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
                         ),
@@ -492,16 +737,30 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
                             foregroundColor: ink,
                             side: const BorderSide(color: Color(0xFFE5E7EB)),
                             backgroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             padding: EdgeInsets.zero,
                           ),
-                          child: Icon(_torchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded),
+                          child: Icon(
+                            _torchOn
+                                ? Icons.flash_on_rounded
+                                : Icons.flash_off_rounded,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  const Text('ESQ SCANNER  •  CREW CHECK-IN', style: TextStyle(fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Color(0xFF9CA3AF))),
+                  const Text(
+                    'ESQ SCANNER  •  CREW CHECK-IN',
+                    style: TextStyle(
+                      fontSize: 9,
+                      letterSpacing: 1.1,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -525,10 +784,27 @@ class _ScannerHomeState extends State<ScannerHome> with WidgetsBindingObserver {
           children: [
             Icon(icon, color: color, size: 18),
             const SizedBox(height: 8),
-            Text('$value', style: TextStyle(fontSize: 23, height: 1, fontWeight: FontWeight.w900, color: color)),
+            Text(
+              '$value',
+              style: TextStyle(
+                fontSize: 23,
+                height: 1,
+                fontWeight: FontWeight.w900,
+                color: color,
+              ),
+            ),
             const SizedBox(height: 5),
-            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 8, letterSpacing: .4, fontWeight: FontWeight.w900, color: muted)),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 8,
+                letterSpacing: .4,
+                fontWeight: FontWeight.w900,
+                color: muted,
+              ),
+            ),
           ],
         ),
       ),
